@@ -16,13 +16,39 @@ include("LMP_EnergyEval3.jl")
 ## Main Function:
 function main()
     KMC_param=[38.5952545516548, 1.681903628276755]; #29
-    Run_KMC(2400,1.013,KMC_param,1100)
+    Run_KMC(2000,1.013,KMC_param,1100)
 end
 
 ## Parameter Optimization Target Function
 function my_MSE_Eval(KMCparams_mult)
 
 end
+
+function loadExistingConfiguration(BaseLatticeFile,BaseOxyFile,BaseBoxFile)
+	println("Load Configuration")
+	HFLatticeSites = reshape([],0,7);
+    OLatticeSites = reshape([],0,7);    
+	boxparams = reshape([],0,3);
+	locparams=[[] [] []]
+    for line in readlines(BaseLatticeFile)
+        atom = reshape([parse(Float64, x) for x in split(line, "\t")],1,7)
+        HFLatticeSites=vcat(HFLatticeSites,atom);
+    end
+    
+    for line in readlines(BaseOxyFile)
+        atom = reshape([parse(Float64, x) for x in split(line, "\t")],1,7)
+        OLatticeSites=vcat(OLatticeSites,atom);
+    end
+
+    for line in readlines(BaseBoxFile)
+        locparams = reshape([parse(Float64, x) for x in split(line, "\t")],1,3)
+        boxparams=vcat(boxparams,locparams);
+    end
+	
+	println("Configuration Loaded")
+	return HFLatticeSites,OLatticeSites,boxparams
+end
+
 
 function generateBaseBCCLattice(RepX, RepY, RepZ, alpha::Any=3.5416)
     #alpha=3.5416;	#lattice parameters
@@ -53,20 +79,20 @@ function generateBaseBCCLattice(RepX, RepY, RepZ, alpha::Any=3.5416)
     return HFLatticeSites
 end
 
-function GenerateOxygenTrialPoints(RepX, RepY, RepZ, BaseLattice::Matrix=HFLatticeSites,alpha::Any=3.5416, mergePointCuttoff::Float64=.66)
-    xSize=alpha*RepX;
-    ySize=alpha*RepY;
-    zSize=alpha*RepZ;
+function GenerateOxygenTrialPoints(SimDim,UnitCellSize, BaseLattice::Matrix=HFLatticeSites, mergePointCuttoff::Float64=.66)
+    xSize=SimDim[1];
+    ySize=SimDim[2];
+    zSize=SimDim[3];
 
     # Create ghost atoms to account for periodic boundary conditions
     extBaseLattice=BaseLattice[:,4:6];
-    BLxlo=extBaseLattice[extBaseLattice[:,1].<4*alpha,:].+[xSize,0,0]';
-    BLxhi=extBaseLattice[extBaseLattice[:,1].>xSize-(4*alpha),:].-[xSize,0,0]';
+    BLxlo=extBaseLattice[extBaseLattice[:,1].<4*UnitCellSize[1],:].+[xSize,0,0]';
+    BLxhi=extBaseLattice[extBaseLattice[:,1].>xSize-(4*UnitCellSize[1]),:].-[xSize,0,0]';
     extBaseLattice=[extBaseLattice;BLxlo;BLxhi];
-    BLylo=extBaseLattice[extBaseLattice[:,2].<4*alpha,:].+[0,ySize,0]';
-    BLyhi=extBaseLattice[extBaseLattice[:,2].>ySize-(4*alpha),:].-[0,ySize,0]';
+    BLylo=extBaseLattice[extBaseLattice[:,2].<4*UnitCellSize[2],:].+[0,ySize,0]';
+    BLyhi=extBaseLattice[extBaseLattice[:,2].>ySize-(4*UnitCellSize[2]),:].-[0,ySize,0]';
     extBaseLattice=[extBaseLattice;BLylo;BLyhi];
-    BLzlo=extBaseLattice[(extBaseLattice[:,3].<3*alpha) .& (extBaseLattice[:,3].>0),:].*[1,1,-1]';
+    BLzlo=extBaseLattice[(extBaseLattice[:,3].<3*UnitCellSize[3]) .& (extBaseLattice[:,3].>0),:].*[1,1,-1]';
     extBaseLattice=[extBaseLattice;BLzlo];
 
     numBasePoints=size(extBaseLattice,1);
@@ -79,7 +105,7 @@ function GenerateOxygenTrialPoints(RepX, RepY, RepZ, BaseLattice::Matrix=HFLatti
         result[partialsortperm(v, 1:n; rev=rev)] .= true
         return result
     end
-
+	RepZ=round(zSize/UnitCellSize[3]);
     KEY_upperExtBL=nlargest(extBaseLattice[:,3],minimum([round(Int,numBasePoints*2/RepZ),numBasePoints]));
 
     Index_upperExtBL=collect(1:1:numBasePoints)
@@ -91,7 +117,7 @@ function GenerateOxygenTrialPoints(RepX, RepY, RepZ, BaseLattice::Matrix=HFLatti
 
     for ind = 1:size(Ind_surfaceAtoms,1)
         locPos=surfaceAtoms[ind,:];
-        searchSpacing=alpha*3/8;
+        searchSpacing=maximum(UnitCellSize[1:2])*3/8;
         xdist=surfaceAtoms[:,1].-locPos[1];
         ydist=surfaceAtoms[:,2].-locPos[2];
         neighKEY=(abs.(xdist).<searchSpacing).&(abs.(ydist).<searchSpacing);
@@ -182,11 +208,11 @@ function GenerateOxygenTrialPoints(RepX, RepY, RepZ, BaseLattice::Matrix=HFLatti
 
     # Remove Any Overlaps with Base Atoms
     extBaseLattice=BaseLattice[:,4:6];
-    BLxlo=extBaseLattice[extBaseLattice[:,1].<1*alpha,:].+[xSize,0,0]';
-    BLxhi=extBaseLattice[extBaseLattice[:,1].>xSize-(1*alpha),:].-[xSize,0,0]';
+    BLxlo=extBaseLattice[extBaseLattice[:,1].<1*UnitCellSize[1],:].+[xSize,0,0]';
+    BLxhi=extBaseLattice[extBaseLattice[:,1].>xSize-(1*UnitCellSize[1]),:].-[xSize,0,0]';
     extBaseLattice=[extBaseLattice;BLxlo;BLxhi];
-    BLylo=extBaseLattice[extBaseLattice[:,2].<1*alpha,:].+[0,ySize,0]';
-    BLyhi=extBaseLattice[extBaseLattice[:,2].>ySize-(1*alpha),:].-[0,ySize,0]';
+    BLylo=extBaseLattice[extBaseLattice[:,2].<1*UnitCellSize[2],:].+[0,ySize,0]';
+    BLyhi=extBaseLattice[extBaseLattice[:,2].>ySize-(1*UnitCellSize[2]),:].-[0,ySize,0]';
     extBaseLattice=[extBaseLattice;BLylo;BLyhi];
 
 
@@ -206,24 +232,24 @@ function GenerateOxygenTrialPoints(RepX, RepY, RepZ, BaseLattice::Matrix=HFLatti
 
 end
 
-function RecalcOxygenLattice(RepX, RepY, RepZ, BaseLattice::Matrix=HFLatticeSites, BaseOxy::Matrix=OLatticeSites,alpha::Any=3.5416, mergePointCuttoff::Float64=1.65)
+function RecalcOxygenLattice(SimDim,UnitCellSize, BaseLattice::Matrix=HFLatticeSites, BaseOxy::Matrix=OLatticeSites, mergePointCuttoff::Float64=1.65)
 # Recalculate the lattice of trial oxygen points.  First uses GenerateOxygenTrialPoints to generate a lattice of points based on the atom structure in the BaseLattice (HFLatticeSites).
 # Then those points are checked against the list of existing oxygen atoms.
 
-    xSize=alpha*RepX;
-    ySize=alpha*RepY;
-    zSize=alpha*RepZ;
+    xSize=SimDim[1];
+    ySize=SimDim[2];
+    zSize=SimDim[3];
 
     # Create ghost atoms to account for periodic boundary conditions
     extBaseOxy=BaseOxy[:,4:6];
-    BLxlo=extBaseOxy[extBaseOxy[:,1].<1*alpha,:].+[xSize,0,0]';
-    BLxhi=extBaseOxy[extBaseOxy[:,1].>xSize-(1*alpha),:].-[xSize,0,0]';
+    BLxlo=extBaseOxy[extBaseOxy[:,1].<1*UnitCellSize[1],:].+[xSize,0,0]';
+    BLxhi=extBaseOxy[extBaseOxy[:,1].>xSize-(1*UnitCellSize[1]),:].-[xSize,0,0]';
     extBaseOxy=[extBaseOxy;BLxlo;BLxhi];
-    BLylo=extBaseOxy[extBaseOxy[:,2].<1*alpha,:].+[0,ySize,0]';
-    BLyhi=extBaseOxy[extBaseOxy[:,2].>ySize-(1*alpha),:].-[0,ySize,0]';
+    BLylo=extBaseOxy[extBaseOxy[:,2].<1*UnitCellSize[2],:].+[0,ySize,0]';
+    BLyhi=extBaseOxy[extBaseOxy[:,2].>ySize-(1*UnitCellSize[2]),:].-[0,ySize,0]';
     extBaseOxy=[extBaseOxy;BLylo;BLyhi];
 
-    midMatrix,thirdMatrix,fourthMatrix =GenerateOxygenTrialPoints(RepX,RepY,RepZ,BaseLattice,alpha);
+    midMatrix,thirdMatrix,fourthMatrix =GenerateOxygenTrialPoints(SimDim,UnitCellSize,BaseLattice);
 
     # Scan list of trial sites to remove those within mergePointCuttoff of an existing oxygen atom.
     for ind=1:size(extBaseOxy,1)
@@ -308,39 +334,56 @@ function write_time()
 end
 
 function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
-    ImportAtoms=false;
+    ImportAtoms=true;
 
-    #Set rough material properties
-    alpha=3.5416;	#lattice parameters (assuming cubic)
-    RepX=6;		#lattice unit cells in X dim
-    RepY=6;		#lattice unit cells in Y dim
-    RepZ=10;	#lattice unit cells in Z dim
+	# Lattice Generation Parameters
     HfOxygenBondDist=1.77;   #angstroms (Covalent radius or S-orbital radius) is also approx sigma LJ parameter
-    # Lattice Generation Parameters
     MinOxySpacing=1.65; #angstroms 	spacing used when grid searching for floating lattice points
-    #HfOxygenBondDistCutoff=HfOxygenBondDist-spacing/1.5; #Hard shell cuttoff when ruling out lattice locations
+
+    #Initialize HF Lattice
+    global HFLatticeSites = reshape([],0,7);
+    global OLatticeSites = reshape([],0,7);    
+	
+	if ImportAtoms==true
+		println("Reading Initial Configuration")
+		HFLatticeSites,OLatticeSites,boxparams=loadExistingConfiguration("baseHf_hcp.dat","baseO_hcp.dat","baseDIM_hcp.dat");
+		global SimDim=boxparams[1,:];
+		global UnitCellSize=boxparams[2,:];
+	else
+		println("Generating Initial Configuration")
+		alpha=3.5416;	#lattice parameters (assuming cubic)
+
+		RepX=6;		#lattice unit cells in X dim
+		RepY=6;		#lattice unit cells in Y dim
+		RepZ=10;	#lattice unit cells in Z dim
+
+		XwallHi=alpha*RepX;
+		YwallHi=alpha*RepY;
+		ZwallHi=alpha*RepZ+50; #Hight of material + 50 angstrom buffer
+		
+		global SimDim=[XwallHi, YwallHi, ZwallHi];	#Size of simulation box in angstroms (leave at least 20 angstroms of empty space above surface).
+		global UnitCellSize=[alpha, alpha, alpha]#[3.2,2.7,5.08]; #Approx unit cell size in each dimension (rectangular simulation box only).
+		HFLatticeSites=generateBaseBCCLattice(RepX,RepY,RepZ);
+	end
 
     #Set KMC parameters
-    #Temp in Kelvin
-    #Press = oxygen partial pressure in bar
+		#Temp in Kelvin
+		#Press = oxygen partial pressure in bar
     dataEvery=2; #Output data every # of attempted moves
 
     Kb=1.380649*10^-23; #Boltzmann constant [J/K]
     Kb_ev=8.617333262145*10^-5; #Boltzmann constant [J/K]
 
     MassO2=5.3134*10^-26; # Mass of O2 [kg]
-    XwallHi=alpha*RepX;
-    YwallHi=alpha*RepY;
-    ZwallHi=alpha*RepZ+50; #Hight of material + 50 angstrom buffer
-    global SimDim=[XwallHi, YwallHi, ZwallHi];
+
     #KMC Event rates
-    AdsRate=((Press*100000)./sqrt(2*pi*MassO2*Kb*Temp)*(RepX*RepY*alpha^2*1e-20) / 1e9)^-1; #Impact Rate estimated by molecular impingement rate (Ideal Gas)
+    AdsRate=((Press*100000)./sqrt(2*pi*MassO2*Kb*Temp)*(SimDim[1]*SimDim[2]*1e-20) / 1e9)^-1; #Impact Rate estimated by molecular impingement rate (Ideal Gas)
     TrsRate=KMCparams[1]; # Expected time for atom translation move [nanoseconds per atom]
-    ImpactScalingFactor=KMCparams[2]/alpha; # Impact strength (low numbers increase impact depth)
+    ImpactScalingFactor=KMCparams[2]/UnitCellSize[3]; # Impact strength (low numbers increase impact depth)
 
     #MD parameters
     global MD_timestep=.0005;
-    SetMD_Sims=16;
+    SetMD_Sims=8;
     MaxConcurrentSims=4;
     smallMinSteps=10;
     smallMDsteps=10;
@@ -351,16 +394,13 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
     #surfaceDepthInCells=1.5;
     global LMPvect=startN_LAMMPS_instances(SetMD_Sims);
 
-    println("Generating Initial Configuration")
-    #Initialize HF Lattice
-    global HFLatticeSites=generateBaseBCCLattice(RepX,RepY,RepZ);
-
-    #Initialize Oxy Lattice
-    global OLatticeSites= [ [] [] [] [] [] [] [] ];
-
+	
+   println("Run Initial Minimize")
+   OLatticeSites,HFLatticeSites = MinimizeCoords(LMPvect,OLatticeSites,HFLatticeSites,Temp,MD_timestep,SimDim,smallMinSteps,smallMDsteps);
+   println("Initial Configuration Obtained")
     #Generate Initial OxyTrialSites
-    global OxyTrialSites=RecalcOxygenLattice(RepX,RepY,RepZ,HFLatticeSites,OLatticeSites,alpha,MinOxySpacing);
-    println("Initial Configuration Obtained")
+    global OxyTrialSites=RecalcOxygenLattice(SimDim,UnitCellSize,HFLatticeSites,OLatticeSites,MinOxySpacing);
+
 
     ## Begin Simulation
     global MoveCounter=0; #Number of moves taken
@@ -369,24 +409,10 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
     global OxAdsorbed=[0 0]; #Number of adsorbed oxygen atoms [time,#atoms]
     global PossibleNeighbors=[];
 
-    #=
-    println("Load Configuration")
-    global HFLatticeSites = reshape([],0,7);
-    global OLatticeSites = reshape([],0,7);
 
-    for line in readlines("base.dat")
-        atom = reshape([parse(Float64, x) for x in split(line, "\t")],1,7)
-        HFLatticeSites=vcat(HFLatticeSites,atom);
-    end
-
-    for line in readlines("baseOxygen.dat")
-        atom = reshape([parse(Float64, x) for x in split(line, "\t")],1,7)
-        OLatticeSites=vcat(OLatticeSites,atom);
-    end
-
-    global OxyTrialSites=RecalcOxygenLattice(RepX,RepY,RepZ,HFLatticeSites,OLatticeSites,alpha,MinOxySpacing);
-    println("Configuration Loaded")
-    =#
+    global OxyTrialSites=RecalcOxygenLattice(SimDim,UnitCellSize,HFLatticeSites,OLatticeSites,MinOxySpacing);
+    
+    #
 
     while MoveCounter<1000000 #Time<MaxKMCtime
         global OLatticeSites
@@ -422,7 +448,7 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
 
             LocTrialSites=hcat(OxyTrialSites,zeros(size(OxyTrialSites,1),1));
             LocTrialSites=vcat(OLatticeSites[:,4:7],LocTrialSites);
-            LocTrialSites=LocTrialSites[maximum(HFLatticeSites[:,6]).-LocTrialSites[:,3].<0.9*alpha,:];
+            LocTrialSites=LocTrialSites[maximum(HFLatticeSites[:,6]).-LocTrialSites[:,3].<0.9*UnitCellSize[3],:];
 
             SurfWeights=Weights( exp.(-((maximum(HFLatticeSites[:,6]).-LocTrialSites[:,3])).*ImpactScalingFactor) );
             NumSurfSites=size(SurfWeights,1);
@@ -442,7 +468,7 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
             end
             if (locSite1[4] == 0) || (locSite2[4] == 0)
                 OLatticeSites,HFLatticeSites = MinimizeCoords(LMPvect,OLatticeSites,HFLatticeSites,Temp,MD_timestep,SimDim,smallMinSteps,smallMDsteps);
-                OxyTrialSites=RecalcOxygenLattice(RepX,RepY,RepZ,HFLatticeSites,OLatticeSites,alpha,MinOxySpacing);
+                OxyTrialSites=RecalcOxygenLattice(SimDim,UnitCellSize,HFLatticeSites,OLatticeSites,MinOxySpacing);
             end
 
 
@@ -459,28 +485,28 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
             PossibleNeighbors=OxyTrialSites;
 
             # Check X Periodic Boundary Conditions
-            Xlo=LocOxy[4]-alpha+1.0;
-            Xhi=LocOxy[4]+alpha-1.0;
+            Xlo=LocOxy[4]-UnitCellSize[1]+1.0;
+            Xhi=LocOxy[4]+UnitCellSize[1]-1.0;
             if Xlo<0
-                Xlo2=Xlo+alpha*RepX;
+                Xlo2=Xlo+SimDim[1];
                 PossibleNeighbors=PossibleNeighbors[(PossibleNeighbors[:,1].>Xlo2) .| (PossibleNeighbors[:,1].<Xhi),:];
-            elseif Xhi>alpha*RepX
-                Xhi2=Xhi-alpha*RepX;
+            elseif Xhi>SimDim[1]
+                Xhi2=Xhi-SimDim[1];
                 PossibleNeighbors=PossibleNeighbors[(PossibleNeighbors[:,1].>Xlo) .| (PossibleNeighbors[:,1].<Xhi2),:];
             else
                 PossibleNeighbors=PossibleNeighbors[(PossibleNeighbors[:,1].<Xhi) .& (PossibleNeighbors[:,1].>Xlo),:];
             end
 
             # Check Y Periodic Boundary Conditions
-            Ylo=LocOxy[5]-alpha+1.0;
-            Yhi=LocOxy[5]+alpha-1.0;
+            Ylo=LocOxy[5]-UnitCellSize[2]+1.0;
+            Yhi=LocOxy[5]+UnitCellSize[2]-1.0;
             if Ylo<0
 
-                Ylo2=Ylo+alpha*RepY;
+                Ylo2=Ylo+SimDim[2];
                 PossibleNeighbors=PossibleNeighbors[(PossibleNeighbors[:,2].>Ylo2) .| (PossibleNeighbors[:,2].<Yhi),:];
-            elseif Yhi>alpha*RepY
+            elseif Yhi>SimDim[2]
 
-                Yhi2=Yhi-alpha*RepY;
+                Yhi2=Yhi-SimDim[2];
                 PossibleNeighbors=PossibleNeighbors[(PossibleNeighbors[:,2].>Ylo) .| (PossibleNeighbors[:,2].<Yhi2),:];
             else
 
@@ -488,8 +514,8 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
             end
 
             # Z dim (no PBC)
-            Zlo=LocOxy[6]-alpha+1.0;
-            Zhi=LocOxy[6]+alpha-1.0;
+            Zlo=LocOxy[6]-UnitCellSize[3]+1.0;
+            Zhi=LocOxy[6]+UnitCellSize[3]-1.0;
             PossibleNeighbors=PossibleNeighbors[(PossibleNeighbors[:,3].<Zhi) .& (PossibleNeighbors[:,3].>Zlo),:];
 
             if ~isempty(PossibleNeighbors)
@@ -768,7 +794,7 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
                 end
                 #println(Time)
 
-                OxyTrialSites=RecalcOxygenLattice(RepX,RepY,RepZ,HFLatticeSites,OLatticeSites,alpha,MinOxySpacing);
+                OxyTrialSites=RecalcOxygenLattice(SimDim,UnitCellSize,HFLatticeSites,OLatticeSites,MinOxySpacing);
 
             else
                 println("skipping: no viable destinations")
@@ -785,7 +811,7 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
         else
             println("Run Short MD Simulation")
             #@time OLatticeSites,HFLatticeSites = MinimizeCoords(LMPvect,OLatticeSites,HFLatticeSites,Temp,MD_timestep,SimDim,mediumMinSteps,largeMDsteps);
-            OxyTrialSites=RecalcOxygenLattice(RepX,RepY,RepZ,HFLatticeSites,OLatticeSites,alpha,MinOxySpacing);
+            OxyTrialSites=RecalcOxygenLattice(SimDim,UnitCellSize,HFLatticeSites,OLatticeSites,MinOxySpacing);
 			Time=Time+(MD_timestep*largeMDsteps*.001);
         end
 
@@ -820,7 +846,7 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
 
             full_table = vcat(O_table,HF_table)
             full_table[1] = Int64(len_O+len_hf-2)
-            writedlm("plot/xyz.$MoveCounter.xyz",full_table);
+            writedlm("plot_xyz.$MoveCounter.xyz",full_table);
         end;
 
         MoveCounter=MoveCounter+1
