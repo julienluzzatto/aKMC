@@ -16,7 +16,7 @@ include("LMP_EnergyEval3.jl")
 ## Main Function:
 function main()
     KMC_param=[38.5952545516548, 1.681903628276755]; #29
-    Run_KMC(2000,1.013,KMC_param,1100)
+    Run_KMC(2400,1.013,KMC_param,1100)
 end
 
 ## Parameter Optimization Target Function
@@ -27,14 +27,14 @@ end
 function loadExistingConfiguration(BaseLatticeFile,BaseOxyFile,BaseBoxFile)
 	println("Load Configuration")
 	HFLatticeSites = reshape([],0,7);
-    OLatticeSites = reshape([],0,7);    
+    OLatticeSites = reshape([],0,7);
 	boxparams = reshape([],0,3);
 	locparams=[[] [] []]
     for line in readlines(BaseLatticeFile)
         atom = reshape([parse(Float64, x) for x in split(line, "\t")],1,7)
         HFLatticeSites=vcat(HFLatticeSites,atom);
     end
-    
+
     for line in readlines(BaseOxyFile)
         atom = reshape([parse(Float64, x) for x in split(line, "\t")],1,7)
         OLatticeSites=vcat(OLatticeSites,atom);
@@ -44,7 +44,7 @@ function loadExistingConfiguration(BaseLatticeFile,BaseOxyFile,BaseBoxFile)
         locparams = reshape([parse(Float64, x) for x in split(line, "\t")],1,3)
         boxparams=vcat(boxparams,locparams);
     end
-	
+
 	println("Configuration Loaded")
 	return HFLatticeSites,OLatticeSites,boxparams
 end
@@ -319,6 +319,16 @@ function write_traj()
     end;
 end
 
+function write_moves(energy_barrier,z_position,number_neighbours)
+
+    moves = open("moves.txt", "a")
+
+    println(moves, energy_barrier)
+    println(moves, z_position)
+    println(moves, number_neighbours)
+
+end
+
 function write_time()
 
     global Time
@@ -326,15 +336,15 @@ function write_time()
 
     NumbOxy=size(OLatticeSites,1);
 
-    traj = open("time.txt", "a")
+    times = open("time.txt", "a")
 
-    println(traj, NumbOxy)
-    println(traj, Time)
+    println(times, NumbOxy)
+    println(times, Time)
 
 end
 
 function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
-    ImportAtoms=true;
+    ImportAtoms=false;
 
 	# Lattice Generation Parameters
     HfOxygenBondDist=1.77;   #angstroms (Covalent radius or S-orbital radius) is also approx sigma LJ parameter
@@ -342,8 +352,8 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
 
     #Initialize HF Lattice
     global HFLatticeSites = reshape([],0,7);
-    global OLatticeSites = reshape([],0,7);    
-	
+    global OLatticeSites = reshape([],0,7);
+
 	if ImportAtoms==true
 		println("Reading Initial Configuration")
 		HFLatticeSites,OLatticeSites,boxparams=loadExistingConfiguration("baseHf_hcp.dat","baseO_hcp.dat","baseDIM_hcp.dat");
@@ -360,20 +370,19 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
 		XwallHi=alpha*RepX;
 		YwallHi=alpha*RepY;
 		ZwallHi=alpha*RepZ+50; #Hight of material + 50 angstrom buffer
-		
+
 		global SimDim=[XwallHi, YwallHi, ZwallHi];	#Size of simulation box in angstroms (leave at least 20 angstroms of empty space above surface).
 		global UnitCellSize=[alpha, alpha, alpha]#[3.2,2.7,5.08]; #Approx unit cell size in each dimension (rectangular simulation box only).
 		HFLatticeSites=generateBaseBCCLattice(RepX,RepY,RepZ);
 	end
 
     #Set KMC parameters
-		#Temp in Kelvin
-		#Press = oxygen partial pressure in bar
+	#Temp in Kelvin
+	#Press = oxygen partial pressure in bar
     dataEvery=2; #Output data every # of attempted moves
 
     Kb=1.380649*10^-23; #Boltzmann constant [J/K]
     Kb_ev=8.617333262145*10^-5; #Boltzmann constant [J/K]
-
     MassO2=5.3134*10^-26; # Mass of O2 [kg]
 
     #KMC Event rates
@@ -390,11 +399,11 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
     mediumMinSteps=50;
     mediumMDsteps=250;
     largeMDsteps=25000;
-	surfaceDepthInCells=0.9
+	surfaceDepthInCells=0.9;
     #surfaceDepthInCells=1.5;
     global LMPvect=startN_LAMMPS_instances(SetMD_Sims);
 
-	
+
    println("Run Initial Minimize")
    OLatticeSites,HFLatticeSites = MinimizeCoords(LMPvect,OLatticeSites,HFLatticeSites,Temp,MD_timestep,SimDim,smallMinSteps,smallMDsteps);
    println("Initial Configuration Obtained")
@@ -411,7 +420,9 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
 
 
     global OxyTrialSites=RecalcOxygenLattice(SimDim,UnitCellSize,HFLatticeSites,OLatticeSites,MinOxySpacing);
-    
+
+    dump_CONFIG();
+
     #
 
     while MoveCounter<1000000 #Time<MaxKMCtime
@@ -433,7 +444,12 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
         Type2PerNS=1/(TrsRate/NumbOxy);	#Current Oxygen translation move rate
         Type3PerNS=1/AdsRate/400;		#Current Probability of Running a short MD segment
 
-        display([Type1PerNS,Type2PerNS,Type3PerNS]')
+        Type1PerNS=1/2;
+        Type2PerNS=1/2;
+        Type3PerNS=0;
+
+        println("Impact / Translation / MD");
+        println([Type1PerNS,Type2PerNS,Type3PerNS]');
 
         FPdeck=Type1PerNS+Type2PerNS+Type3PerNS;	#Normalize probability distribution
         draw=rand(1)*FPdeck;			#Pick which type of move
@@ -441,9 +457,9 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
 
         if draw[1]<Type1PerNS			#Oxygen molecule impacts surface
             #Add atom to surface
-            println("Add up to 2 Surface Oxygen")
+            println("+++++++++++++++ Add up to 2 Surface Oxygen")
             #Advance time
-            dt = AdsRate/(1)*log(1/(rand(1)[1]))
+            dt = AdsRate/(1)*log(1/(rand(1)[1]));
             Time=Time+dt;
 
             LocTrialSites=hcat(OxyTrialSites,zeros(size(OxyTrialSites,1),1));
@@ -473,9 +489,9 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
 
 
         elseif draw[1]<Type1PerNS+Type2PerNS && NumbOxy>0
-            println("Translate an Oxygen Atom")
+            println(">>>>>>>>>>>>>>> Translate an Oxygen Atom")
 
-            try
+             try
 
             indi = rand(1:size(OLatticeSites,1),1)
             LocOxy=OLatticeSites[indi,:];	#Select a random oxygen atom
@@ -542,7 +558,7 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
 
                 py"""
 
-                def dimer_search(oxygen_tag,xdim,ydim,zdim,dimer_searches=5):
+                def dimer_search(oxygen_tag,xdim,ydim,zdim,dimer_searches=5,temp=2400):
 
                     #auxiliary packages
                     import os
@@ -636,7 +652,7 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
                     #auxiliary dimer method functions
 
                     #boltzmann acceptance criterion
-                    def kmc_boltz(dE,v0=1,Kb_ev=8.617333262145e-5,Temp=2400,upper_bound=1):
+                    def kmc_boltz(dE,v0=1,Kb_ev=8.617333262145e-5,Temp=temp,upper_bound=1):
                         return v0*np.exp(-dE/(Kb_ev*Temp),dtype=np.float128) / upper_bound
 
                     #construction of the structure
@@ -759,7 +775,8 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
                     #accept or reject translation
                     accept = False
                     both.positions[target] = r0b
-                    print(kmc_boltz(diff))
+                    k = kmc_boltz(diff)
+                    print(k)
                     if np.random.random() < kmc_boltz(diff):
                         both.positions[target] = rf_tmp
                         rf = rf_tmp
@@ -774,21 +791,24 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
                     #dyn = BFGS(both)
                     #dyn.run(fmax=0.05)
 
-                    return diff,rf
+                    return diff,rf,k
                 """
 
-                diff,rf = py"dimer_search"(indi,SimDim[1],SimDim[2],SimDim[3],1)
+                diff,rf,k = py"dimer_search"(indi,SimDim[1],SimDim[2],SimDim[3],1,Temp)
+
+                neigh = size(PossibleNeighbors,1);
+                #write_moves(diff,rf[3],neigh);
 
                 #OLatticeSites=vcat(OLatticeSites,[LocOxy[1] 4 0 PossibleNeighbors[moveAccepted,1:3]' 1]);
                 OLatticeSites=OLatticeSites[LocOxy[1].!=OLatticeSites[:,1],:]; #Remove Moving Atom From List
-                r0bx, r0by, r0bz = rf
+                r0bx, r0by, r0bz = rf;
                 OLatticeSites=vcat(OLatticeSites,[LocOxy[1] 4 0 r0bx r0by r0bz 1]);
-                dt = 1/(TrsRate)*log(1/(rand(1)[1]))
+                dt = 1/(TrsRate)*log(1/(rand(1)[1]));
                 Time=Time+dt;
 
                 ##################################################################
 
-                if MoveCounter % 8 == 0
+                if MoveCounter % 20 == 0
                     println("Minimize Coords<<<<<<<<<<<<<<<")
                     OLatticeSites,HFLatticeSites = MinimizeCoords(LMPvect,OLatticeSites,HFLatticeSites,Temp,MD_timestep,SimDim,smallMinSteps,smallMDsteps); # Minimize Coordinates
                 end
@@ -815,6 +835,7 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
 			Time=Time+(MD_timestep*largeMDsteps*.001);
         end
 
+        plot_xyz = false;
         if MoveCounter % 20 == 0
             write_time()
             if isfile("log_trial.txt")
@@ -826,32 +847,34 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
                 open("log.lammps","a")
             end
 
-            x_hf,y_hf,z_hf,b_hf = HFLatticeSites[:,4],HFLatticeSites[:,5],HFLatticeSites[:,6],HFLatticeSites[:,7];
-			len_hf = size(x_hf)[1]
-			HF_table = Array{Union{Float64,Int64,String}}(undef, len_hf, 4)
-			for i in 1:len_hf
-				HF_table[i,:] = ["Hf" x_hf[i] y_hf[i] z_hf[i]]
-			end
+            if plot_xyz==true
+                x_hf,y_hf,z_hf,b_hf = HFLatticeSites[:,4],HFLatticeSites[:,5],HFLatticeSites[:,6],HFLatticeSites[:,7];
+    			len_hf = size(x_hf)[1]
+    			HF_table = Array{Union{Float64,Int64,String}}(undef, len_hf, 4)
+    			for i in 1:len_hf
+    				HF_table[i,:] = ["Hf" x_hf[i] y_hf[i] z_hf[i]]
+    			end
 
-            x_o,y_o,z_o,b_o = OLatticeSites[:,4],OLatticeSites[:,5],OLatticeSites[:,6],OLatticeSites[:,7];
-            len_o = size(x_o)[1] + 2
-            O_table = [0 " " " " " "; "#" " " " " " "]
-            for i in 1:len_o-2
-                j = i+2
-                if b_o[i]==1
-                    O_table = vcat(O_table, ["O" x_o[i] y_o[i] z_o[i]])
+                x_o,y_o,z_o,b_o = OLatticeSites[:,4],OLatticeSites[:,5],OLatticeSites[:,6],OLatticeSites[:,7];
+                len_o = size(x_o)[1] + 2
+                O_table = [0 " " " " " "; "#" " " " " " "]
+                for i in 1:len_o-2
+                    j = i+2
+                    if b_o[i]==1
+                        O_table = vcat(O_table, ["O" x_o[i] y_o[i] z_o[i]])
+                    end
                 end
-            end
-            len_O = size(O_table)[1]
+                len_O = size(O_table)[1]
 
-            full_table = vcat(O_table,HF_table)
-            full_table[1] = Int64(len_O+len_hf-2)
-            writedlm("plot_xyz.$MoveCounter.xyz",full_table);
+                full_table = vcat(O_table,HF_table)
+                full_table[1] = Int64(len_O+len_hf-2)
+                writedlm("plot_xyz.$MoveCounter.xyz",full_table);
+            end;
         end;
 
         MoveCounter=MoveCounter+1
         dump_CONFIG();
-        println("Time #Haf #Oxy");
+        println("Time / #Haf / #Oxy");
         println([Time,NumbHaf,NumbOxy]');
     end
 end
