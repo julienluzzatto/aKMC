@@ -17,7 +17,7 @@ include("LMP_EnergyEval4.jl")
 ## Main Function:
 function main()
     KMC_param=[38.5952545516548, 1.681903628276755]; #29
-    Run_KMC(2000,1.013,KMC_param,1100)
+    Run_KMC(1200,1.013,KMC_param,100000)
 end
 
 function loadExistingConfiguration(BaseLatticeFile,BaseOxyFile,BaseBoxFile)
@@ -335,7 +335,7 @@ function write_time()
     println(times, Time)
 end
 
-function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
+function Run_KMC(Temp, Press, KMCparams, MaxKMCmoves)
     ImportAtoms=true;
 
 	# Lattice Generation Parameters
@@ -348,8 +348,8 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
 
 	if ImportAtoms==true
 		println("Reading Initial Configuration")
-        HFLatticeSites,OLatticeSites,boxparams=loadExistingConfiguration("baseHf_hcp.dat","baseO_hcp.dat","baseDIM_hcp.dat");
-        #HFLatticeSites,OLatticeSites,boxparams=loadExistingConfiguration("base.dat","baseOxygen.dat","baseDIM_hcp.dat");
+        #HFLatticeSites,OLatticeSites,boxparams=loadExistingConfiguration("baseHf_hcp.dat","baseO_hcp.dat","baseDIM_hcp.dat");
+        HFLatticeSites,OLatticeSites,boxparams=loadExistingConfiguration("base.dat","baseOxygen.dat","baseDIM_hcp.dat");
 		global SimDim=boxparams[1,:];
 		global UnitCellSize=boxparams[2,:];
 
@@ -373,10 +373,8 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
     #Set KMC parameters
 	#Temp in Kelvin
 	#Press = oxygen partial pressure in bar
-    dataEvery=2; #Output data every # of attempted moves
 
     Kb=1.380649*10^-23; #Boltzmann constant [J/K]
-    Kb_ev=8.617333262145*10^-5; #Boltzmann constant [J/K]
     MassO2=5.3134*10^-26; # Mass of O2 [kg]
 
     #KMC Event rates
@@ -405,9 +403,8 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
     global OxyTrialSites=RecalcOxygenLattice(SimDim,UnitCellSize,HFLatticeSites,OLatticeSites,MinOxySpacing);
 
     ## Begin Simulation
-    global MoveCounter=0; #Number of moves taken
-    global Time=0; #nanoseconds
-    global LastTime=0; #nanoseconds
+    global MoveCounter=2610; #Number of moves taken
+    global Time=15; #nanoseconds
     global OxAdsorbed=[0 0]; #Number of adsorbed oxygen atoms [time,#atoms]
     global PossibleNeighbors=[];
     global plot_xyz_yet=true;
@@ -416,14 +413,13 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
 
     #
 
-    while MoveCounter<10000000 #Time<MaxKMCtime
+    while MoveCounter<MaxKMCmoves
         global OLatticeSites
         global HFLatticeSites
         global OxyTrialSites
         global MoveCounter
         global Time
         global Energy
-        global LastTime
         global OxAdsorbed
         global LMPvect
         global PossibleNeighbors
@@ -439,14 +435,14 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
         Type2PerNS=1/(TrsRate/NumbOxy);	#Current Oxygen translation move rate
         Type3PerNS=1/AdsRate/400;		#Current Probability of Running a short MD segment
 
-        if NumbOxy < 150
-            Type1PerNS=13/16;
-            Type2PerNS=3/16;
-        else
-            Type1PerNS=3/16;
-            Type2PerNS=13/16;
-        end
-        Type3PerNS=1/20;
+        # if NumbOxy < 100
+        #     Type1PerNS=15/16;
+        #     Type2PerNS=1/16;
+        # else
+        #     Type1PerNS=1/16;
+        #     Type2PerNS=15/16;
+        # end
+        # Type3PerNS=1/4000;
 
         println("Impact / Translation / MD");
         println([Type1PerNS,Type2PerNS,Type3PerNS]');
@@ -619,8 +615,10 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
                     #auxiliary dimer method functions
 
                     #boltzmann acceptance criterion
-                    def kmc_boltz(dE,v0=1,Kb_ev=8.617333262145e-5,Temp=temp,upper_bound=1):
-                        return v0*np.exp(-dE/(Kb_ev*Temp),dtype=np.float128) / upper_bound
+                    def kmc_boltz(dE,Temp=temp,v0=1,upper_bound=1):
+                        Kb_ev, h_ev = 8.617333262e-5, 4.135667662e-15
+                        prefactor = v0 * (Kb_ev * Temp / h_ev)
+                        return prefactor * np.exp(-dE/(Kb_ev*Temp),dtype=np.float128) / upper_bound
 
                     #construction of the structure
                     both = Hf + Oxy
@@ -629,7 +627,7 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
 
                     #dynamic variables
                     target = int(len(Hf) + oxygen_tag - 1)
-                    n,Kb = len(both),1.380649e-23
+                    n = len(both)
                     r0 = both.positions[target]
                     r0b = copy.deepcopy(r0)
 
@@ -649,13 +647,14 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
                     amendments = ["compute AtomPE all pe/atom"]
 
                     #setting the calculator
-                    lammps = LAMMPSlib(lmpcmds=cmds, amendments=amendments, log_file='log.lammps', keep_alive=True)
-                    both.calc = lammps
-                    e0 = both.get_potential_energy()
+                    #lammps = LAMMPSlib(lmpcmds=cmds, amendments=amendments, log_file='log.lammps', keep_alive=True)
+                    #both.calc = lammps
+                    #e0 = both.get_potential_energy()
                     #energies = both.get_potential_energies()
 
                     lammps = LAMMPSlib(lmpcmds=cmds, log_file='log.lammps', keep_alive=True)
                     both.calc = lammps
+                    e0 = both.get_potential_energy()
 
                     if plot:
                         with open("plots/plot_xyz.{}.xyz".format(20 * (move//20)), 'w') as fout:
@@ -707,9 +706,8 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
                     #accept or reject translation
                     accept = False
                     both.positions[target] = r0b
-                    k = kmc_boltz(diff)
-                    print(k)
-                    if np.random.random() < kmc_boltz(diff):
+                    k = kmc_boltz(diff,Temp=temp)
+                    if np.random.random() < k:
                         both.positions[target] = rf_tmp
                         rf = rf_tmp
                         accept = True
@@ -718,6 +716,10 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
                         both.positions[target] = r0b
                     print('Accepted: ' + str(accept) + '<<<<<<<<<<<<<<<<')
 
+                    #delete lammps object
+                    del lammps
+
+                    #return output
                     return diff,rf,k,e0
                 """
 
@@ -734,7 +736,7 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
                 OLatticeSites=OLatticeSites[LocOxy[1].!=OLatticeSites[:,1],:]; #Remove Moving Atom From List
                 r0bx, r0by, r0bz = rf;
                 OLatticeSites=vcat(OLatticeSites,[LocOxy[1] 4 0 r0bx r0by r0bz 1]);
-                dt = 1/(TrsRate)*log(1/(rand(1)[1]));
+                dt = (- log((rand(1)[1])) / k);
                 Time=Time+dt;
 
             else
@@ -759,11 +761,12 @@ function Run_KMC(Temp, Press, KMCparams, MaxKMCtime)
         end
 
         plot_xyz = true;
-        if MoveCounter % 20 == 0
+        if MoveCounter % 40 == 0
             # Minimize Coordinates
             println("Minimize Coords<<<<<<<<<<<<<<<")
             OLatticeSites,HFLatticeSites = MinimizeCoords(LMPvect,OLatticeSites,HFLatticeSites,Temp,MD_timestep,SimDim,smallMinSteps,smallMDsteps);
-
+        end
+        if MoveCounter % 20 == 0
             # Remove tmp files
             if isfile("log.lammps")
                 rm("log.lammps")
