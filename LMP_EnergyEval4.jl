@@ -1,6 +1,6 @@
 #!/usr/bin/env julia
 
-function writeMinimization(HfAtoms,OxAtoms,BoxSizes,file="Atoms.dat",etol=10,ftol=10,maxiter=10000,maxeval=10000)
+function writeMinimization(HfAtoms,OxAtoms,BoxSizes,file="Atoms.dat")
 
 	open("in.min", "w") do io
 		println(io, "clear");
@@ -8,7 +8,7 @@ function writeMinimization(HfAtoms,OxAtoms,BoxSizes,file="Atoms.dat",etol=10,fto
 		# Basic setup
 		println(io, "units metal");
 		#println(io, "atom_style atomic");
-		println(io, "atom_style charge")
+		println(io, "atom_style charge");
 		println(io, "atom_modify map array sort 0 0.0");
 		println(io, "dimension 3");
 		println(io, "boundary p p m");
@@ -62,11 +62,11 @@ function writeMinimization(HfAtoms,OxAtoms,BoxSizes,file="Atoms.dat",etol=10,fto
 		println(io, "fix 1 all box/relax x 0.0 y 0.0");
 		println(io, "min_style cg");
 		println(io, "min_modify dmax 1.0e-2 line quadratic");
-		println(io, "minimize 1e-" * string(etol) * " 1e-" * string(ftol) * " " * string(maxiter) * " " * string(maxeval));
+		println(io, "minimize 1e-10 1e-10 10000 10000");
 	end
 end
 
-function writeNEB(HfAtoms,OxAtoms,BoxSizes,Target)
+function writeNEB(HfAtoms,OxAtoms,BoxSizes,Target,file="Atoms.dat")
 #function NEB_write_input(OLatticeSites,HFLatticeSites,Temp,MD_timestep,SimDim,MinSteps,MDsteps,target,coords)
 
 	open("in.neb", "w") do io
@@ -74,25 +74,20 @@ function writeNEB(HfAtoms,OxAtoms,BoxSizes,Target)
 
 		# Basic setup
 		println(io, "units metal");
-		println(io, "atom_style atomic");
+		#println(io, "atom_style atomic");
+		println(io, "atom_style charge");
 		println(io, "atom_modify map array sort 0 0.0");
 		println(io, "dimension 3");
 		println(io, "boundary p p m");
 		println(io, "processors * * *");
 
-		# Define box
-		println(io, "region SimulationDomain block 0.0 " * string(BoxSizes[1]) * " 0.0 " * string(BoxSizes[2]) * " 0.0 " * string(BoxSizes[3]));
-		println(io, "create_box 1 SimulationDomain");
+		# Create box
+		println(io, "region simdim block 0.0 " * string(BoxSizes[1]) * " 0.0 " * string(BoxSizes[2]) * " 0.0 " * string(BoxSizes[3]));
+		OxPositions = pyconvert(Matrix{Float64},OxAtoms.positions);
+		println(io, "create_box 2 simdim");
 
-		# Create atoms
-		HfPositions = pyconvert(Matrix{Float64},HfAtoms.positions)
-		OxPositions = pyconvert(Matrix{Float64},OxAtoms.positions)
-		for jnd=1:size(HfPositions,1)
-			println(io, "create_atoms 1 single " * string(HfPositions[jnd,4]) * " " * string(HfPositions[jnd,5]) * " " * string(HfPositions[jnd,6]));
-		end
-		for knd=1:size(OxPositions,1)
-			println(io, "create_atoms 2 single " * string(OxPositions[knd,4]) * " " * string(OxPositions[knd,5]) * " " * string(OxPositions[knd,6]));
-		end
+		# Import configuration
+		println(io, "read_data " * file * " add append");
 
 		# Define regular groups
 		println(io, "group Hf type 1");
@@ -103,8 +98,11 @@ function writeNEB(HfAtoms,OxAtoms,BoxSizes,Target)
 		println(io, "mass 2 15.9990");
 
 		# Define potential
-		println(io, "pair_style pod");
-		println(io, "pair_coeff * * /home/gridsan/jluzzatto/aKMC/pod.txt /home/gridsan/jluzzatto/aKMC/coefficients.txt Hf O");
+		#println(io, "pair_style pod");
+		println(io, "pair_style comb");
+		#println(io, "pair_coeff * * pod.txt coefficients.txt Hf O");
+		println(io, "pair_coeff * * ffield.comb Hf O");
+		println(io, "fix CombQEQ all qeq/comb 1 0.001");
 		println(io, "neighbor 0.3 bin");
 		println(io, "neigh_modify every 1 delay 5");
 
@@ -122,9 +120,7 @@ function writeNEB(HfAtoms,OxAtoms,BoxSizes,Target)
 		println(io, "thermo 1");
 
 		# Dump new coordinates
-		println(io, "dump 1 Hf custom 100000 dump.Hf id type x y z");
-		println(io, "dump 2 Ox custom 100000 dump.Ox id type x y z");
-		println(io, "dump 3 atomNEB custom 10 dump.neb id type x y z")
+		println(io, "dump 1 atomNEB custom 10 dump.neb id type x y z")
 
 		# Run nudged elastic band calculation
 		println(io, "min_style quickmin");
