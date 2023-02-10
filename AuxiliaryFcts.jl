@@ -3,7 +3,6 @@
 #global
 using ASEconvert
 using LinearAlgebra
-using Distributed
 using Interpolations
 using UnicodePlots
 using DelimitedFiles
@@ -55,23 +54,23 @@ function runMinimization(HfAtoms,OxAtoms,BoxSizes)
 	HfAtoms,OxAtoms,BoxSizes = MinimizeCoords(HfAtoms,OxAtoms,BoxSizes);
 end
 
-function MinimizeCoords(HfAtoms,OxAtoms,BoxSizes,dumpHf="dump.Hf",dumpOx="dump.Ox")
-	try
-		Haf = ase.io.read(dumpHf,format="lammps-dump-text");
-		Haf.set_chemical_symbols(["Hf" for at in Haf]);
-		Haf.wrap(pbc=[1,1,0]);
+function MinimizeCoords(HfAtoms,OxAtoms,BoxSizes)
+	Haf = ase.io.read("dump.Hf",format="lammps-dump-text");
+	Haf.set_chemical_symbols(["Hf" for at in Haf]);
+	Haf.wrap(pbc=[1,1,0]);
 
-		Oxy = ase.io.read(dumpOx,format="lammps-dump-text");
+	OxPositions = pyconvert(Matrix{Float64},OxAtoms.positions);
+	if size(OxPositions,1) > 0
+		Oxy = ase.io.read("dump.Ox",format="lammps-dump-text");
 		Oxy.set_chemical_symbols(["O" for at in Oxy]);
 		Oxy.wrap(pbc=[1,1,0]);
-
-		Box = [Oxy.cell[0,0],Oxy.cell[1,1],Oxy.cell[2,2]];
-		println("Minimization Achieved");
-		return Haf,Oxy,Box
-	catch
-		println("Minimization Failed");
-		return HfAtoms,OxAtoms,BoxSizes
+	else
+		Oxy = ase.Atoms();
 	end
+
+	Box = pyconvert(Array{Float64},[Haf.cell[0,0],Haf.cell[1,1],Haf.cell[2,2]]);
+	println("Minimization Achieved");
+	return Haf,Oxy,Box
 end
 
 function GenerateOxygenTrialPoints(Box,Unit,HfLattice,MinSpacing)
@@ -217,7 +216,7 @@ function RecalcOxygenLattice(Box,Unit,HfLattice,OxLattice,MinSpacing)
     # Recalculate the lattice of trial oxygen points.  First uses GenerateOxygenTrialPoints to generate a lattice of points based on the atom structure in the BaseLattice (HFLatticeSites).
     # Then those points are checked against the list of existing oxygen atoms.
     xSize,ySize,zSize = Box;
-	BaseOxy = pyconvert(Matrix{Any},OxLattice.positions)
+	BaseOxy = pyconvert(Matrix{Any},OxLattice.positions);
 
     # Create ghost atoms to account for periodic boundary conditions
     extBaseOxy = BaseOxy[:,1:3];
@@ -276,14 +275,17 @@ function adsorbAtom(HfAtoms,OxAtoms,TrialSites,UnitCell,BoxSizes,Temp,Press,Impa
 	return OxAtoms,dt
 end
 
-function sortNeighbours(PossibleNeighbors,OxAtoms,TargetLoc,UnitCell)
+function sortNeighbours(PosNei,OxAtoms,Target,UnitCell)
 	# Calculate the distances from the translating atom
-	TargDest = OxAtoms[TargetLoc].position;
-	Distances = pyconvert(Vector{Float64},ase.geometry.get_distances(TargDest,OxAtoms.positions)[1][0]);
+	#Distances = colwise(SqEuclidean(),repeat(Target',size(PosNei,1))',PosNei');
+	Distances = [norm(Target .- PosNei[i,:]) for i in 1:size(PosNei,1)];
+
 	# Filtering between the possible destinations
-	PossibleNeighbors = PossibleNeighbors[(Distances .> 0.1) .& (Distances .< UnitCell[1])];
+	Bools = (Distances .> 0.1) .& (Distances .< UnitCell[1]);
+	PosNei = hcat(PosNei[:,1][Bools],PosNei[:,2][Bools],PosNei[:,3][Bools]);
 	Distances = Distances[(Distances .> 0.1) .& (Distances .< UnitCell[1])];
-	PossibleNeighbors = hcat(PossibleNeighbors,Distances)[sortperm(hcat(PossibleNeighbors,Distances)[:, 4]), :];
+	PossibleNeighbors = hcat(PosNei,Distances)[sortperm(hcat(PosNei,Distances)[:, 4]), :];
+
 	return PossibleNeighbors
 end
 
@@ -294,29 +296,26 @@ function writeDestination(Target,Location,file="coords.dat")
 	end
 end
 
-function runNEB(HfAtoms,OxAtoms,BoxSizes,TargetAtom,FinalLoc,log="log.lammps",dumpHf="dump.Hf",dumpOx="dump.Ox")
+function runNEB(HfAtoms,OxAtoms,BoxSizes,TargetAtom,FinalLoc,log="log.lammps",loc="dump.neb")
 	# Write NEB Input Files
+	ase.io.write("Atoms.dat",HfAtoms+OxAtoms,format="lammps-data",atom_style="charge");
 	writeDestination(TargetAtom,FinalLoc);
 	writeNEB(HfAtoms,OxAtoms,BoxSizes,TargetAtom);
 
+	println("NEB Started");
 	command = command2;
 	read(command)
 
 	logFile = readlines(log);
-    logLast = split(logfile[end])[7];
-	Barrier = parse(Float64,logLast);;
+    logLast = split(logFile[end])[7];
+	Barrier = parse(Float64,logLast);
 
-	Haf = ase.io.read(dumpHf,format="lammps-dump-text");
-	Haf.set_chemical_symbols(["Hf" for at in Haf]);
-	Haf.wrap(pbc=[1,1,0]);
+	locFile = readlines(loc);
+    locLast = split(locFile[end-2])[3:5];
+	Location = [parse(Float64,locLast[1]),parse(Float64,locLast[2]),parse(Float64,locLast[3])]
 
-	Oxy = ase.io.read(dumpOx,format="lammps-dump-text");
-	Oxy.set_chemical_symbols(["O" for at in Oxy]);
-	Oxy.wrap(pbc=[1,1,0]);
-
-	Box = [Oxy.cell[0,0],Oxy.cell[1,1],Oxy.cell[2,2]];
-	println("Minimization Achieved");
-	return Haf,Oxy,BoxSizes,Barrier
+	println("NEB Achieved");
+	return Barrier,Location
 end
 
 function logBarriers(ebs)
@@ -326,25 +325,21 @@ function logBarriers(ebs)
 end
 
 function timeInference(dE,Temp)
-	v0 = 1;
-	upper_bound = 1;
-	Kb_ev = 8.617333262e-5;
-	h_ev = 4.135667662e-15;
+	v0,Kb_ev,h_ev,time_ns = 1,8.617333262e-5,4.135667662e-15,1e9;
 	prefactor = v0 * (Kb_ev * Temp / h_ev);
-	time_ns = 1e9;
-	return time_ns * prefactor * exp(- dE / (Kb_ev*Temp)) / upper_bound;
+	return time_ns * prefactor * exp(- dE / (Kb_ev*Temp));
 end
 
 function dumpConfiguration(HfAtoms,OxAtoms)
     # Dump atomic coordinates
 	ase.io.write("HfAtoms.extxyz",HfAtoms,format="extxyz")
-	ase.io.write("OxAtoms.extxyz",HfAtoms,format="extxyz")
+	ase.io.write("OxAtoms.extxyz",OxAtoms,format="extxyz")
 	ase.io.write("Atoms.extxyz",HfAtoms+OxAtoms,format="extxyz")
 end
 
 function writeTime(Time,OxAtoms)
     #write time log file
-    NumOxy = size(pyconvert(Any,OxAtoms.positions))[1];
+    NumOxy = size(pyconvert(Any,OxAtoms.positions),1);
     Times = open("time.txt", "a")
     println(Times, NumOxy)
     println(Times, Time)
