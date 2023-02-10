@@ -311,7 +311,7 @@ function runNEB(HfAtoms,OxAtoms,BoxSizes,TargetAtom,FinalLoc,log="log.lammps",lo
 	Barrier = parse(Float64,logLast);
 
 	locFile = readlines(loc);
-    locLast = split(locFile[end-2])[3:5];
+    locLast = split(locFile[end])[3:5];
 	Location = [parse(Float64,locLast[1]),parse(Float64,locLast[2]),parse(Float64,locLast[3])]
 
 	println("NEB Achieved");
